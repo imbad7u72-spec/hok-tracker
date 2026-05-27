@@ -202,6 +202,22 @@ body::before {
   border-bottom: 1px solid var(--border);
   text-align: center;
 }
+.panel-note {
+  font-size: 12px;
+  color: var(--ink-faint);
+  text-align: center;
+  margin: -6px 0 12px;
+  font-style: italic;
+}
+.result-prompt {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  text-align: center;
+  margin-bottom: 8px;
+}
 
 /* ============ LOG VIEW ============ */
 .picker-grid {

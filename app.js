@@ -2,6 +2,11 @@
    HoK Matchup Tracker — PWA logic
    Role-aware match logging with per-role rosters & history.
    Storage: localStorage, keyed by "hok-tracker-v1".
+   Schema v2: each role has one shared hero list. Matches are
+   logged as { firstPick, response, result } where result is W/L
+   from the FIRST PICKER's perspective. The matrix view shows
+   each hero pair from the row-hero's perspective by flipping
+   results when needed.
    ========================================================= */
 
 const STORAGE_KEY = 'hok-tracker-v1';
@@ -10,25 +15,23 @@ const ROLE_LABELS = {
   jungle: 'Jungle', mid: 'Mid', clash: 'Clash', adc: 'ADC', support: 'Support'
 };
 
-// ---------- Default seed data (carries over the pre-fills from earlier) ----------
+// ---------- Default seed data ----------
 function defaultRoleData() {
   return {
-    myPicks:    [],   // string[]
-    enemyPicks: [],   // string[]
-    history:    []    // { id, myPick, enemyPick, result: 'W'|'L', ts }
+    heroes:  [],   // string[] — single combined list per role
+    history: []    // { id, firstPick, response, result: 'W'|'L', ts }
   };
 }
 function defaultState() {
   const data = {};
   for (const r of ROLES) data[r] = defaultRoleData();
-  // seed the jungle role with the heroes from earlier conversations
-  data.jungle.myPicks    = ['Ukyo', 'Pei'];
-  data.jungle.enemyPicks = ['Feyd', 'Wukong'];
+  // seed the jungle role with heroes from earlier conversations
+  data.jungle.heroes = ['Ukyo', 'Pei', 'Feyd', 'Wukong'];
   data.jungle.history = [
-    { id: cryptoId(), myPick: 'Ukyo', enemyPick: 'Feyd',   result: 'W', ts: Date.now() - 86400000 },
-    { id: cryptoId(), myPick: 'Pei',  enemyPick: 'Wukong', result: 'W', ts: Date.now() - 3600000 }
+    { id: cryptoId(), firstPick: 'Ukyo', response: 'Feyd',   result: 'W', ts: Date.now() - 86400000 },
+    { id: cryptoId(), firstPick: 'Pei',  response: 'Wukong', result: 'W', ts: Date.now() - 3600000 }
   ];
-  return { version: 1, currentRole: 'jungle', data };
+  return { version: 2, currentRole: 'jungle', data };
 }
 
 function cryptoId() {
@@ -40,6 +43,50 @@ function cryptoId() {
   return Math.random().toString(36).slice(2);
 }
 
+// ---------- Migration from v1 → v2 ----------
+function migrateRoleV1toV2(role) {
+  // v1 fields: myPicks, enemyPicks, history[{ myPick, enemyPick, result }]
+  const v2 = { heroes: [], history: [] };
+
+  // Merge roster lists, dedupe case-insensitively but preserve original casing
+  const seen = new Set();
+  const addHero = (name) => {
+    if (!name) return;
+    const key = String(name).trim().toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    v2.heroes.push(String(name).trim());
+  };
+  (role.myPicks    || []).forEach(addHero);
+  (role.enemyPicks || []).forEach(addHero);
+
+  // Convert history: old myPick → firstPick, old enemyPick → response.
+  // Result was W/L from the my-pick's perspective; first-pick's perspective
+  // is the same since myPick == firstPick.
+  for (const m of (role.history || [])) {
+    if (!m) continue;
+    // Already migrated? skip
+    if (m.firstPick || m.response) {
+      v2.history.push({
+        id: m.id || cryptoId(),
+        firstPick: m.firstPick, response: m.response,
+        result: m.result, ts: m.ts || Date.now()
+      });
+      continue;
+    }
+    // Also ensure heroes referenced in history are in the roster
+    addHero(m.myPick); addHero(m.enemyPick);
+    v2.history.push({
+      id: m.id || cryptoId(),
+      firstPick: m.myPick,
+      response:  m.enemyPick,
+      result:    m.result,
+      ts:        m.ts || Date.now()
+    });
+  }
+  return v2;
+}
+
 // ---------- State + persistence ----------
 let state;
 function loadState() {
@@ -47,14 +94,23 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
-    // Forward-compat: ensure all roles exist
-    for (const r of ROLES) {
-      if (!parsed.data[r]) parsed.data[r] = defaultRoleData();
-      parsed.data[r].myPicks    = parsed.data[r].myPicks    || [];
-      parsed.data[r].enemyPicks = parsed.data[r].enemyPicks || [];
-      parsed.data[r].history    = parsed.data[r].history    || [];
-    }
     parsed.currentRole = parsed.currentRole || 'jungle';
+    parsed.data = parsed.data || {};
+    // Migrate or normalize each role
+    for (const r of ROLES) {
+      const incoming = parsed.data[r];
+      if (!incoming) { parsed.data[r] = defaultRoleData(); continue; }
+      const needsMigration = ('myPicks' in incoming) || ('enemyPicks' in incoming)
+        || (incoming.history || []).some(m => m && (m.myPick || m.enemyPick));
+      if (needsMigration) {
+        parsed.data[r] = migrateRoleV1toV2(incoming);
+      } else {
+        // Already v2: ensure required fields exist
+        parsed.data[r].heroes  = incoming.heroes  || [];
+        parsed.data[r].history = incoming.history || [];
+      }
+    }
+    parsed.version = 2;
     return parsed;
   } catch (e) {
     console.error('Bad saved state, resetting.', e);
@@ -104,23 +160,38 @@ function setStatus(elId, msg, kind='') {
 }
 
 // ---------- Aggregation from history ----------
-function computeRecord(myPick, enemyPick, role=state.currentRole) {
-  if (!myPick || !enemyPick) return { wins: 0, games: 0 };
+// Returns {wins, games} for `subject` when matched against `opponent`,
+// counting BOTH directions: games where subject was first pick AND games
+// where opponent was first pick (result is flipped from subject's POV).
+function computeRecord(subject, opponent, role=state.currentRole) {
+  if (!subject || !opponent) return { wins: 0, games: 0 };
   const h = state.data[role].history;
   let w = 0, g = 0;
   for (const m of h) {
-    if (m.myPick === myPick && m.enemyPick === enemyPick) {
-      g++;
-      if (m.result === 'W') w++;
+    if (m.firstPick === subject && m.response === opponent) {
+      // subject was first pick → result is from subject's POV directly
+      g++; if (m.result === 'W') w++;
+    } else if (m.firstPick === opponent && m.response === subject) {
+      // opponent was first pick → flip the result for subject's POV
+      g++; if (m.result === 'L') w++;
     }
   }
   return { wins: w, games: g };
 }
+
+// Overall is just totals across all games (no per-perspective flipping needed
+// because we count games, not "subject perspective" — every game has one W
+// and one L).
 function computeOverall(role=state.currentRole) {
   const h = state.data[role].history;
-  let w = 0;
-  for (const m of h) if (m.result === 'W') w++;
-  return { wins: w, games: h.length, losses: h.length - w };
+  let firstWins = 0;
+  for (const m of h) if (m.result === 'W') firstWins++;
+  // Total games + first-pick win rate, for the Overall stat strip
+  return {
+    games: h.length,
+    firstPickWins: firstWins,
+    firstPickLosses: h.length - firstWins
+  };
 }
 
 // ---------- Render: role bar ----------
@@ -140,31 +211,42 @@ function fillSelect(selectEl, options, preserve=true) {
 }
 function renderLogView() {
   const d = currentRoleData();
-  fillSelect($('myPick'), d.myPicks);
-  fillSelect($('enemyPick'), d.enemyPicks);
+  fillSelect($('firstPick'), d.heroes);
+  fillSelect($('response'),  d.heroes);
   renderRecordCard();
   renderOverall();
+  updateResultButtonLabels();
 }
 function renderRecordCard() {
-  const my = $('myPick').value, en = $('enemyPick').value;
+  const first = $('firstPick').value, resp = $('response').value;
   const card = $('recordCard');
-  if (!my || !en) {
+  if (!first || !resp) {
     card.innerHTML = '<div class="record-empty">Pick both heroes to see record</div>';
     return;
   }
-  const { wins, games } = computeRecord(my, en);
+  if (first === resp) {
+    card.innerHTML = '<div class="record-empty">Pick two different heroes</div>';
+    return;
+  }
+  // Show record from the FIRST PICK's perspective in this matchup
+  const { wins, games } = computeRecord(first, resp);
   const losses = games - wins;
   const pct = games > 0 ? ((wins/games)*100).toFixed(1) + '%' : '—';
   card.innerHTML = '';
-  card.appendChild(el('div', { class: 'record-line' }, `${wins}W · ${losses}L · ${games} games`));
+  card.appendChild(el('div', { class: 'record-line' }, `${first}: ${wins}W · ${losses}L in ${games} games`));
   card.appendChild(el('div', { class: 'record-pct' + (games === 0 ? ' dim' : '') }, pct));
 }
+function updateResultButtonLabels() {
+  const first = $('firstPick').value, resp = $('response').value;
+  $('winBtnLabel').textContent  = first || 'First Pick';
+  $('lossBtnLabel').textContent = resp  || 'Response';
+}
 function renderOverall() {
-  const { wins, games, losses } = computeOverall();
-  $('ovWins').textContent   = wins;
-  $('ovLosses').textContent = losses;
-  $('ovTotal').textContent  = games;
-  $('ovPct').textContent    = games > 0 ? ((wins/games)*100).toFixed(1) + '%' : '—';
+  const { games, firstPickWins, firstPickLosses } = computeOverall();
+  $('ovFpWins').textContent    = firstPickWins;
+  $('ovFpLosses').textContent  = firstPickLosses;
+  $('ovTotal').textContent     = games;
+  $('ovFpPct').textContent     = games > 0 ? ((firstPickWins/games)*100).toFixed(1) + '%' : '—';
 }
 
 // ---------- Render: matrix view ----------
@@ -172,38 +254,37 @@ function renderMatrix() {
   const d = currentRoleData();
   const hideEmpty = $('hideEmptyMatchups').checked;
 
-  // Keep filter dropdowns in sync with the current roster
-  populateFilterSelect($('filterMyPick'), d.myPicks);
-  populateFilterSelect($('filterEnemyPick'), d.enemyPicks);
+  // Both axes pull from the same hero list now
+  populateFilterSelect($('filterRow'), d.heroes);
+  populateFilterSelect($('filterCol'), d.heroes);
 
-  const myFilter = $('filterMyPick').value;
-  const enemyFilter = $('filterEnemyPick').value;
-  const filtering = !!(myFilter || enemyFilter);
+  const rowFilter = $('filterRow').value;
+  const colFilter = $('filterCol').value;
+  const filtering = !!(rowFilter || colFilter);
   $('clearFiltersBtn').hidden = !filtering;
 
   const table = $('matrixTable');
   table.innerHTML = '';
 
-  // Compute which rows/cols have any games (for hide-empty)
-  const rowHas = {}, colHas = {};
+  // Which heroes appear in any game? (for hide-empty)
+  const appears = {};
   if (hideEmpty) {
     for (const m of d.history) {
-      rowHas[m.myPick] = true;
-      colHas[m.enemyPick] = true;
+      appears[m.firstPick] = true;
+      appears[m.response]  = true;
     }
   }
 
-  // Start from the full roster, then apply hide-empty, then apply explicit filters
-  let rows = hideEmpty ? d.myPicks.filter(h => rowHas[h]) : d.myPicks.slice();
-  let cols = hideEmpty ? d.enemyPicks.filter(h => colHas[h]) : d.enemyPicks.slice();
-  if (myFilter)    rows = rows.filter(h => h === myFilter);
-  if (enemyFilter) cols = cols.filter(h => h === enemyFilter);
+  let rows = hideEmpty ? d.heroes.filter(h => appears[h]) : d.heroes.slice();
+  let cols = hideEmpty ? d.heroes.filter(h => appears[h]) : d.heroes.slice();
+  if (rowFilter) rows = rows.filter(h => h === rowFilter);
+  if (colFilter) cols = cols.filter(h => h === colFilter);
 
   if (rows.length === 0 || cols.length === 0) {
     let msg;
-    if (filtering) msg = 'No matchups for that filter.';
+    if (filtering)      msg = 'No matchups for that filter.';
     else if (hideEmpty) msg = 'No played matchups yet for this role.';
-    else msg = 'Add heroes on the Roster tab to get started.';
+    else                msg = 'Add heroes on the Roster tab to get started.';
     table.appendChild(el('tr', {}, el('td', { class: 'empty' }, msg)));
     return;
   }
@@ -211,7 +292,7 @@ function renderMatrix() {
   // Header row
   const thead = el('thead');
   const headRow = el('tr');
-  headRow.appendChild(el('th', { class: 'corner' }, 'My ↓ / Enemy →'));
+  headRow.appendChild(el('th', { class: 'corner' }, 'Row hero ↓ vs Col hero →'));
   for (const c of cols) headRow.appendChild(el('th', {}, c));
   thead.appendChild(headRow);
   table.appendChild(thead);
@@ -221,6 +302,11 @@ function renderMatrix() {
     const tr = el('tr');
     tr.appendChild(el('th', {}, r));
     for (const c of cols) {
+      if (r === c) {
+        // Mirror diagonal: a hero vs itself doesn't make sense
+        tr.appendChild(el('td', { class: 'empty diag' }, '–'));
+        continue;
+      }
       const { wins, games } = computeRecord(r, c);
       if (games === 0) {
         tr.appendChild(el('td', { class: 'empty' }, '—'));
@@ -269,7 +355,7 @@ function renderHistory() {
   const filter = ($('historySearch').value || '').trim().toLowerCase();
   const all = [...currentRoleData().history].sort((a,b) => b.ts - a.ts);
   const filtered = filter
-    ? all.filter(m => m.myPick.toLowerCase().includes(filter) || m.enemyPick.toLowerCase().includes(filter))
+    ? all.filter(m => m.firstPick.toLowerCase().includes(filter) || m.response.toLowerCase().includes(filter))
     : all;
   list.innerHTML = '';
   if (filtered.length === 0) {
@@ -281,9 +367,9 @@ function renderHistory() {
     const row = el('div', { class: 'history-row' });
     row.appendChild(el('div', { class: 'history-result ' + m.result }, m.result));
     const matchup = el('div', { class: 'history-matchup' });
-    matchup.appendChild(document.createTextNode(m.myPick));
+    matchup.appendChild(document.createTextNode(m.firstPick));
     matchup.appendChild(el('span', { class: 'vs-mini' }, 'vs'));
-    matchup.appendChild(document.createTextNode(m.enemyPick));
+    matchup.appendChild(document.createTextNode(m.response));
     row.appendChild(matchup);
     row.appendChild(el('div', { class: 'history-time' }, formatTime(m.ts)));
     row.appendChild(el('button', { class: 'history-del', title: 'Delete', onclick: () => deleteMatch(m.id) }, '✕'));
@@ -305,10 +391,9 @@ function formatTime(ts) {
 // ---------- Render: roster ----------
 function renderRoster() {
   const d = currentRoleData();
-  renderChipList($('myRoster'), d.myPicks, 'my');
-  renderChipList($('enemyRoster'), d.enemyPicks, 'enemy');
+  renderChipList($('heroRoster'), d.heroes);
 }
-function renderChipList(container, names, side) {
+function renderChipList(container, names) {
   container.innerHTML = '';
   if (names.length === 0) {
     container.appendChild(el('div', { class: 'empty-state' }, 'No heroes yet.'));
@@ -318,25 +403,27 @@ function renderChipList(container, names, side) {
     const chip = el('span', { class: 'roster-chip' }, n);
     chip.appendChild(el('span', {
       class: 'x', title: 'Remove',
-      onclick: () => removeHero(side, n)
+      onclick: () => removeHero(n)
     }, '×'));
     container.appendChild(chip);
   }
 }
 
 // ---------- Actions ----------
+// result: 'W' means the FIRST PICK won; 'L' means the RESPONSE won.
 function logMatch(result) {
-  const my = $('myPick').value, en = $('enemyPick').value;
-  if (!my || !en) { setStatus('logStatus', 'Pick both heroes first.', 'error'); return; }
-  const entry = { id: cryptoId(), myPick: my, enemyPick: en, result, ts: Date.now() };
+  const first = $('firstPick').value, resp = $('response').value;
+  if (!first || !resp) { setStatus('logStatus', 'Pick both heroes first.', 'error'); return; }
+  if (first === resp)  { setStatus('logStatus', 'Pick two different heroes.', 'error'); return; }
+  const entry = { id: cryptoId(), firstPick: first, response: resp, result, ts: Date.now() };
   currentRoleData().history.push(entry);
   saveState();
-  setStatus('logStatus', `Logged ${my} vs ${en}: ${result === 'W' ? 'Win' : 'Loss'}`, 'success');
+  const winner = result === 'W' ? first : resp;
+  setStatus('logStatus', `Logged ${first} vs ${resp}: ${winner} won`, 'success');
   $('undoBtn').disabled = false;
   $('undoBtn').dataset.lastId = entry.id;
   renderRecordCard();
   renderOverall();
-  // Light haptic on supported devices
   if (navigator.vibrate) navigator.vibrate(result === 'W' ? 20 : [15, 30, 15]);
 }
 function undoLast() {
@@ -347,7 +434,7 @@ function undoLast() {
   if (idx === -1) { setStatus('logStatus', 'Nothing to undo.', 'error'); return; }
   const removed = hist.splice(idx, 1)[0];
   saveState();
-  setStatus('logStatus', `Undid ${removed.myPick} vs ${removed.enemyPick} (${removed.result})`, 'success');
+  setStatus('logStatus', `Undid ${removed.firstPick} vs ${removed.response}`, 'success');
   $('undoBtn').disabled = true;
   delete $('undoBtn').dataset.lastId;
   renderRecordCard();
@@ -366,27 +453,25 @@ function deleteMatch(id) {
   toast('Match deleted');
 }
 
-function addHero(side, name) {
+function addHero(name) {
   const trimmed = (name || '').trim();
   if (!trimmed) { toast('Enter a hero name', 'error'); return; }
   const d = currentRoleData();
-  const list = side === 'my' ? d.myPicks : d.enemyPicks;
-  if (list.some(n => n.toLowerCase() === trimmed.toLowerCase())) {
+  if (d.heroes.some(n => n.toLowerCase() === trimmed.toLowerCase())) {
     toast(`"${trimmed}" already in this list`, 'error');
     return;
   }
-  list.push(trimmed);
+  d.heroes.push(trimmed);
   saveState();
   renderRoster();
   renderLogView();
   toast(`Added ${trimmed}`, 'success');
 }
-function removeHero(side, name) {
-  if (!confirm(`Remove "${name}" from this list?\n(Past games with this hero are kept.)`)) return;
+function removeHero(name) {
+  if (!confirm(`Remove "${name}" from this role's hero list?\n(Past games involving this hero are kept.)`)) return;
   const d = currentRoleData();
-  const list = side === 'my' ? d.myPicks : d.enemyPicks;
-  const i = list.indexOf(name);
-  if (i !== -1) list.splice(i, 1);
+  const i = d.heroes.indexOf(name);
+  if (i !== -1) d.heroes.splice(i, 1);
   saveState();
   renderRoster();
   renderLogView();
@@ -493,19 +578,19 @@ function bootstrap() {
   $$('.nav-btn').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
 
   // Log view interactions
-  $('myPick').addEventListener('change', renderRecordCard);
-  $('enemyPick').addEventListener('change', renderRecordCard);
-  $('winBtn').addEventListener('click', () => logMatch('W'));
+  $('firstPick').addEventListener('change', () => { renderRecordCard(); updateResultButtonLabels(); });
+  $('response').addEventListener('change',  () => { renderRecordCard(); updateResultButtonLabels(); });
+  $('winBtn').addEventListener('click',  () => logMatch('W'));
   $('lossBtn').addEventListener('click', () => logMatch('L'));
   $('undoBtn').addEventListener('click', undoLast);
 
   // Matrix toggle + filters
   $('hideEmptyMatchups').addEventListener('change', renderMatrix);
-  $('filterMyPick').addEventListener('change', renderMatrix);
-  $('filterEnemyPick').addEventListener('change', renderMatrix);
+  $('filterRow').addEventListener('change', renderMatrix);
+  $('filterCol').addEventListener('change', renderMatrix);
   $('clearFiltersBtn').addEventListener('click', () => {
-    $('filterMyPick').value = '';
-    $('filterEnemyPick').value = '';
+    $('filterRow').value = '';
+    $('filterCol').value = '';
     renderMatrix();
   });
 
@@ -513,17 +598,11 @@ function bootstrap() {
   $('historySearch').addEventListener('input', renderHistory);
 
   // Roster add
-  $('addMyBtn').addEventListener('click', () => {
-    const inp = $('addMyInput');
-    addHero('my', inp.value); inp.value = '';
+  $('addHeroBtn').addEventListener('click', () => {
+    const inp = $('addHeroInput');
+    addHero(inp.value); inp.value = '';
   });
-  $('addEnemyBtn').addEventListener('click', () => {
-    const inp = $('addEnemyInput');
-    addHero('enemy', inp.value); inp.value = '';
-  });
-  // Enter key on add inputs
-  $('addMyInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('addMyBtn').click(); });
-  $('addEnemyInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('addEnemyBtn').click(); });
+  $('addHeroInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('addHeroBtn').click(); });
 
   // Data actions
   $('exportBtn').addEventListener('click', exportData);

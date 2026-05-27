@@ -45,13 +45,13 @@
 
     <div class="picker-grid">
       <div class="picker">
-        <label>My Pick</label>
-        <select id="myPick" class="select"></select>
+        <label>First Pick</label>
+        <select id="firstPick" class="select"></select>
       </div>
       <div class="vs">VS</div>
       <div class="picker">
-        <label>Enemy Pick</label>
-        <select id="enemyPick" class="select"></select>
+        <label>Response</label>
+        <select id="response" class="select"></select>
       </div>
     </div>
 
@@ -59,12 +59,13 @@
       <div class="record-empty">Pick both heroes to see record</div>
     </div>
 
+    <div class="result-prompt" id="resultPrompt">Who won?</div>
     <div class="result-buttons">
       <button class="btn-result btn-win" id="winBtn">
-        <span class="btn-icon">▲</span><span>WIN</span>
+        <span class="btn-icon">▲</span><span id="winBtnLabel">First Pick</span>
       </button>
       <button class="btn-result btn-loss" id="lossBtn">
-        <span class="btn-icon">▼</span><span>LOSS</span>
+        <span class="btn-icon">▼</span><span id="lossBtnLabel">Response</span>
       </button>
     </div>
 
@@ -75,9 +76,9 @@
   <section class="panel overall-panel">
     <div class="panel-eyebrow">This Role · Overall</div>
     <div class="overall-grid" id="overallGrid">
-      <div class="stat"><div class="stat-label">Win Rate</div><div class="stat-value pct" id="ovPct">—</div></div>
-      <div class="stat"><div class="stat-label">Wins</div><div class="stat-value" id="ovWins">0</div></div>
-      <div class="stat"><div class="stat-label">Losses</div><div class="stat-value" id="ovLosses">0</div></div>
+      <div class="stat"><div class="stat-label">First-Pick W%</div><div class="stat-value pct" id="ovFpPct">—</div></div>
+      <div class="stat"><div class="stat-label">FP Wins</div><div class="stat-value" id="ovFpWins">0</div></div>
+      <div class="stat"><div class="stat-label">FP Losses</div><div class="stat-value" id="ovFpLosses">0</div></div>
       <div class="stat"><div class="stat-label">Total</div><div class="stat-value" id="ovTotal">0</div></div>
     </div>
   </section>
@@ -90,12 +91,12 @@
     <div class="panel-eyebrow">Win Rate Matrix</div>
     <div class="matrix-filters">
       <div class="filter-group">
-        <label for="filterMyPick">Filter My Pick</label>
-        <select id="filterMyPick" class="select"><option value="">All</option></select>
+        <label for="filterRow">Filter Row Hero</label>
+        <select id="filterRow" class="select"><option value="">All</option></select>
       </div>
       <div class="filter-group">
-        <label for="filterEnemyPick">Filter Enemy Pick</label>
-        <select id="filterEnemyPick" class="select"><option value="">All</option></select>
+        <label for="filterCol">Filter Column Hero</label>
+        <select id="filterCol" class="select"><option value="">All</option></select>
       </div>
     </div>
     <div class="matrix-controls">
@@ -130,19 +131,12 @@
 <!-- ============ ROSTER VIEW ============ -->
 <main class="view" id="view-roster">
   <section class="panel">
-    <div class="panel-eyebrow">My Picks</div>
-    <div class="roster-list" id="myRoster"></div>
+    <div class="panel-eyebrow">Heroes</div>
+    <p class="panel-note">Any hero in this list can appear as First Pick or as Response when logging matches.</p>
+    <div class="roster-list" id="heroRoster"></div>
     <div class="add-row">
-      <input type="text" id="addMyInput" class="select" placeholder="Add hero name..." />
-      <button class="btn-add" id="addMyBtn">+</button>
-    </div>
-  </section>
-  <section class="panel">
-    <div class="panel-eyebrow">Enemy Picks</div>
-    <div class="roster-list" id="enemyRoster"></div>
-    <div class="add-row">
-      <input type="text" id="addEnemyInput" class="select" placeholder="Add hero name..." />
-      <button class="btn-add" id="addEnemyBtn">+</button>
+      <input type="text" id="addHeroInput" class="select" placeholder="Add hero name..." />
+      <button class="btn-add" id="addHeroBtn">+</button>
     </div>
   </section>
   <section class="panel">
