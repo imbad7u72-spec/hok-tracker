@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#8B0000" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="HoK Tracker" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" type="image/png" href="icons/icon-192.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<title>HoK Matchup Tracker</title>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">♛</span>
+    <div class="brand-text">
+      <div class="brand-title">Honor of Kings</div>
+      <div class="brand-sub">Matchup Tracker</div>
+    </div>
+  </div>
+  <button class="icon-btn" id="menuBtn" aria-label="Menu">⋮</button>
+</header>
+
+<nav class="role-bar" id="roleBar" aria-label="Role selector">
+  <button class="role-pill" data-role="jungle"  data-active="true">Jungle</button>
+  <button class="role-pill" data-role="mid">Mid</button>
+  <button class="role-pill" data-role="clash">Clash</button>
+  <button class="role-pill" data-role="adc">ADC</button>
+  <button class="role-pill" data-role="support">Support</button>
+</nav>
+
+<!-- ============ LOG VIEW ============ -->
+<main class="view" id="view-log" data-active="true">
+
+  <section class="panel">
+    <div class="panel-eyebrow">Log a Match</div>
+
+    <div class="picker-grid">
+      <div class="picker">
+        <label>My Pick</label>
+        <select id="myPick" class="select"></select>
+      </div>
+      <div class="vs">VS</div>
+      <div class="picker">
+        <label>Enemy Pick</label>
+        <select id="enemyPick" class="select"></select>
+      </div>
+    </div>
+
+    <div class="record-card" id="recordCard">
+      <div class="record-empty">Pick both heroes to see record</div>
+    </div>
+
+    <div class="result-buttons">
+      <button class="btn-result btn-win" id="winBtn">
+        <span class="btn-icon">▲</span><span>WIN</span>
+      </button>
+      <button class="btn-result btn-loss" id="lossBtn">
+        <span class="btn-icon">▼</span><span>LOSS</span>
+      </button>
+    </div>
+
+    <button class="btn-ghost" id="undoBtn" disabled>↶ Undo last entry</button>
+    <div class="status" id="logStatus" aria-live="polite"></div>
+  </section>
+
+  <section class="panel overall-panel">
+    <div class="panel-eyebrow">This Role · Overall</div>
+    <div class="overall-grid" id="overallGrid">
+      <div class="stat"><div class="stat-label">Win Rate</div><div class="stat-value pct" id="ovPct">—</div></div>
+      <div class="stat"><div class="stat-label">Wins</div><div class="stat-value" id="ovWins">0</div></div>
+      <div class="stat"><div class="stat-label">Losses</div><div class="stat-value" id="ovLosses">0</div></div>
+      <div class="stat"><div class="stat-label">Total</div><div class="stat-value" id="ovTotal">0</div></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============ MATRIX VIEW ============ -->
+<main class="view" id="view-matrix">
+  <section class="panel">
+    <div class="panel-eyebrow">Win Rate Matrix</div>
+    <div class="matrix-controls">
+      <label class="checkbox">
+        <input type="checkbox" id="hideEmptyMatchups" checked />
+        <span>Hide unplayed matchups</span>
+      </label>
+    </div>
+    <div class="matrix-scroll">
+      <table class="matrix" id="matrixTable"></table>
+    </div>
+    <div class="legend">
+      <span class="swatch swatch-loss"></span><span>0%</span>
+      <span class="swatch swatch-even"></span><span>50%</span>
+      <span class="swatch swatch-win"></span><span>100%</span>
+    </div>
+  </section>
+</main>
+
+<!-- ============ HISTORY VIEW ============ -->
+<main class="view" id="view-history">
+  <section class="panel">
+    <div class="panel-eyebrow">Match History</div>
+    <div class="history-filters">
+      <input type="text" id="historySearch" class="select" placeholder="Filter by hero name..." />
+    </div>
+    <div class="history-list" id="historyList"></div>
+  </section>
+</main>
+
+<!-- ============ ROSTER VIEW ============ -->
+<main class="view" id="view-roster">
+  <section class="panel">
+    <div class="panel-eyebrow">My Picks</div>
+    <div class="roster-list" id="myRoster"></div>
+    <div class="add-row">
+      <input type="text" id="addMyInput" class="select" placeholder="Add hero name..." />
+      <button class="btn-add" id="addMyBtn">+</button>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-eyebrow">Enemy Picks</div>
+    <div class="roster-list" id="enemyRoster"></div>
+    <div class="add-row">
+      <input type="text" id="addEnemyInput" class="select" placeholder="Add hero name..." />
+      <button class="btn-add" id="addEnemyBtn">+</button>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-eyebrow">Data</div>
+    <div class="data-actions">
+      <button class="btn-secondary" id="exportBtn">Export JSON</button>
+      <button class="btn-secondary" id="importBtn">Import JSON</button>
+      <input type="file" id="importFile" accept="application/json" hidden />
+    </div>
+    <button class="btn-danger" id="resetRoleBtn">Reset this role's data</button>
+  </section>
+</main>
+
+<!-- ============ BOTTOM NAV ============ -->
+<nav class="bottom-nav" aria-label="Section">
+  <button class="nav-btn" data-view="log" data-active="true">
+    <span class="nav-icon">⚔</span><span>Log</span>
+  </button>
+  <button class="nav-btn" data-view="matrix">
+    <span class="nav-icon">▦</span><span>Matrix</span>
+  </button>
+  <button class="nav-btn" data-view="history">
+    <span class="nav-icon">⌛</span><span>History</span>
+  </button>
+  <button class="nav-btn" data-view="roster">
+    <span class="nav-icon">☰</span><span>Roster</span>
+  </button>
+</nav>
+
+<!-- ============ MENU SHEET ============ -->
+<div class="sheet-backdrop" id="menuBackdrop" hidden></div>
+<div class="sheet" id="menuSheet" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-title">Options</div>
+  <button class="menu-item" data-action="export">Export all data (JSON)</button>
+  <button class="menu-item" data-action="import">Import data (JSON)</button>
+  <button class="menu-item" data-action="about">About</button>
+</div>
+
+<!-- ============ TOAST ============ -->
+<div class="toast" id="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
