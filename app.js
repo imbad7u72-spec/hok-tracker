@@ -171,10 +171,20 @@ function renderOverall() {
 function renderMatrix() {
   const d = currentRoleData();
   const hideEmpty = $('hideEmptyMatchups').checked;
+
+  // Keep filter dropdowns in sync with the current roster
+  populateFilterSelect($('filterMyPick'), d.myPicks);
+  populateFilterSelect($('filterEnemyPick'), d.enemyPicks);
+
+  const myFilter = $('filterMyPick').value;
+  const enemyFilter = $('filterEnemyPick').value;
+  const filtering = !!(myFilter || enemyFilter);
+  $('clearFiltersBtn').hidden = !filtering;
+
   const table = $('matrixTable');
   table.innerHTML = '';
 
-  // Compute which rows/cols have any games (for hiding)
+  // Compute which rows/cols have any games (for hide-empty)
   const rowHas = {}, colHas = {};
   if (hideEmpty) {
     for (const m of d.history) {
@@ -182,12 +192,19 @@ function renderMatrix() {
       colHas[m.enemyPick] = true;
     }
   }
-  const rows = hideEmpty ? d.myPicks.filter(h => rowHas[h]) : d.myPicks;
-  const cols = hideEmpty ? d.enemyPicks.filter(h => colHas[h]) : d.enemyPicks;
+
+  // Start from the full roster, then apply hide-empty, then apply explicit filters
+  let rows = hideEmpty ? d.myPicks.filter(h => rowHas[h]) : d.myPicks.slice();
+  let cols = hideEmpty ? d.enemyPicks.filter(h => colHas[h]) : d.enemyPicks.slice();
+  if (myFilter)    rows = rows.filter(h => h === myFilter);
+  if (enemyFilter) cols = cols.filter(h => h === enemyFilter);
 
   if (rows.length === 0 || cols.length === 0) {
-    table.appendChild(el('tr', {}, el('td', { class: 'empty' },
-      hideEmpty ? 'No played matchups yet for this role.' : 'Add heroes on the Roster tab to get started.')));
+    let msg;
+    if (filtering) msg = 'No matchups for that filter.';
+    else if (hideEmpty) msg = 'No played matchups yet for this role.';
+    else msg = 'Add heroes on the Roster tab to get started.';
+    table.appendChild(el('tr', {}, el('td', { class: 'empty' }, msg)));
     return;
   }
 
@@ -220,6 +237,16 @@ function renderMatrix() {
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
+}
+
+function populateFilterSelect(sel, options) {
+  const prev = sel.value;
+  sel.innerHTML = '';
+  sel.appendChild(el('option', { value: '' }, 'All'));
+  for (const o of options) sel.appendChild(el('option', { value: o }, o));
+  // Preserve selection if still valid; otherwise fall back to "All"
+  if (prev && options.includes(prev)) sel.value = prev;
+  else sel.value = '';
 }
 function colorScale(t) {
   // 0 → red(F8696B), 0.5 → yellow(FFEB84), 1 → green(63BE7B)
@@ -472,8 +499,15 @@ function bootstrap() {
   $('lossBtn').addEventListener('click', () => logMatch('L'));
   $('undoBtn').addEventListener('click', undoLast);
 
-  // Matrix toggle
+  // Matrix toggle + filters
   $('hideEmptyMatchups').addEventListener('change', renderMatrix);
+  $('filterMyPick').addEventListener('change', renderMatrix);
+  $('filterEnemyPick').addEventListener('change', renderMatrix);
+  $('clearFiltersBtn').addEventListener('click', () => {
+    $('filterMyPick').value = '';
+    $('filterEnemyPick').value = '';
+    renderMatrix();
+  });
 
   // History search
   $('historySearch').addEventListener('input', renderHistory);

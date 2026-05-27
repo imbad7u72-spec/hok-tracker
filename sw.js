@@ -1,4 +1,4 @@
-const CACHE = 'hok-tracker-v1';
+const CACHE = 'hok-tracker-v2';
 const ASSETS = [
   './',
   './index.html',

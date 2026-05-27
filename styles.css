@@ -383,11 +383,40 @@ input.select {
 .stat-value.pct { color: var(--gold); }
 
 /* ============ MATRIX VIEW ============ */
-.matrix-controls {
-  display: flex;
-  justify-content: flex-end;
+.matrix-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
   margin-bottom: 10px;
 }
+.filter-group label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 4px;
+}
+.matrix-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  min-height: 24px;
+}
+.btn-ghost-inline {
+  background: transparent;
+  color: var(--gold-soft);
+  border: 1px solid var(--gold-deep);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.btn-ghost-inline:active { background: rgba(255,215,0,0.08); }
 .checkbox {
   display: inline-flex;
   align-items: center;

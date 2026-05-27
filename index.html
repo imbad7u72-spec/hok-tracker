@@ -88,7 +88,18 @@
 <main class="view" id="view-matrix">
   <section class="panel">
     <div class="panel-eyebrow">Win Rate Matrix</div>
+    <div class="matrix-filters">
+      <div class="filter-group">
+        <label for="filterMyPick">Filter My Pick</label>
+        <select id="filterMyPick" class="select"><option value="">All</option></select>
+      </div>
+      <div class="filter-group">
+        <label for="filterEnemyPick">Filter Enemy Pick</label>
+        <select id="filterEnemyPick" class="select"><option value="">All</option></select>
+      </div>
+    </div>
     <div class="matrix-controls">
+      <button class="btn-ghost-inline" id="clearFiltersBtn" hidden>Clear filters</button>
       <label class="checkbox">
         <input type="checkbox" id="hideEmptyMatchups" checked />
         <span>Hide unplayed matchups</span>
