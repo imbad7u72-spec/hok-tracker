@@ -292,7 +292,7 @@ function renderMatrix() {
   // Header row
   const thead = el('thead');
   const headRow = el('tr');
-  headRow.appendChild(el('th', { class: 'corner' }, 'Row hero ↓ vs Col hero →'));
+  headRow.appendChild(el('th', { class: 'corner' }, 'Hero vs Response'));
   for (const c of cols) headRow.appendChild(el('th', {}, c));
   thead.appendChild(headRow);
   table.appendChild(thead);
